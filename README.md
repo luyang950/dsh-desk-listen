@@ -14,7 +14,7 @@
 
 - **长在会话里**：卡片是一个自定义 chat node，位置就是 `/listen` 那一轮；平时只有一行小字歌名、一行当前歌词和聊天记录，鼠标移上去才浮出按钮。
 - **零 token**：`/listen` 只产生只写日志的 `command/run` / `command/done`，结果只有房间号和房间名。
-- **和房间同步**：按游戏服务器的时钟对位置。偏 1 秒以上才跳过去，跳完等声音真正出来再判断，并记住这台机器跳转要提前多少；偏得少就 0.94～1.06 倍速追上。半分钟最多跳 3 次，不会卡在一段里反复跳。
+- **和房间同步**：按游戏服务器的时钟对位置。偏 1 秒以上才跳过去，跳完等声音真正出来再判断，并记住这台机器跳转要提前多少；偏得少就 0.94～1.06 倍速追上。半分钟最多跳 3 次，不会卡在一段里反复跳。桌面版的页面经过 `dsh-app://` 转发时拿不到音频长度、没法跳转，所以在桌面版里会先把整首歌取下来再放，其他环境里一旦发现跳不过去也会自动这样做。
 - **切会话不断歌**：播放器是整个页面一份，不属于哪张卡片；切到别的会话照样放，回来卡片接着显示。插件更新后（DSH 不刷新页面就换代码时）新版本会接手正在放的房间，旧版本的播放器自动停掉。
 - **在卡片里打字**：
   - 直接打字回车 = 在房间里说话
@@ -96,6 +96,7 @@ lib/client.js       client 半边（ModuleLoader bundle，仅依赖 react）
 
 - Sign in once (card or Settings → 一起听); only the game's session cookie is stored (0600), never the password. Use the game's http address.
 - In the card: type to chat; `/点 <title>` to search and pick; `/切` skip, `/停` `/放` pause/resume, `/队列` queue, `/静音`, `/离开`.
+- Synced to the game's clock. On the desktop app the page is served through `dsh-app://`, whose proxy drops `content-length`, so a stream cannot seek there; songs are fetched whole and played from a blob instead (and anywhere else a stream turns out unseekable).
 - One player per page: music keeps playing across Sessions. The boss key (`Ctrl+Alt+M` by default) folds every card to `···` and can also mute.
 - Calls go only to the game's `/api/mods/listen/*` and `/api/mod-media/listen/*`; writes need the plugin's own header and a same-site Origin.
 

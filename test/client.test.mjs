@@ -231,7 +231,7 @@ test('sync steps: wait after a seek, jump only when far off, otherwise nudge', (
  * A stand-in <audio>: after every seek it stays silent for `latency` seconds
  * (decoder + sound output), then plays on from where it was put.
  */
-function simulate({ latency, joinAt = 30, seconds = 60 }) {
+async function simulate({ latency, joinAt = 30, seconds = 60, href = 'http://127.0.0.1:3080/', seekableStream = true }) {
   let clock = 1_800_000_000_000
   class FakeDate extends Date {
     static now() {
@@ -257,11 +257,20 @@ function simulate({ latency, joinAt = 30, seconds = 60 }) {
       return this.time
     }
     set currentTime(value) {
-      this.time = value
+      // Chromium cannot seek a stream whose length it was not told: it lands on 0.
+      this.time = this.src.startsWith('blob:') || seekableStream ? value : 0
       this.seeks.push(clock)
       this.seeking = true
       this.readyState = 1
       this.resumeAt = clock + latency * 1000
+    }
+    get duration() {
+      return this.src && this.readyState >= 1 ? 240 : NaN
+    }
+    get seekable() {
+      if (!this.src || this.readyState < 1) return { length: 0, end: () => 0 }
+      const end = this.src.startsWith('blob:') || seekableStream ? 240 : 0
+      return { length: 1, end: () => end }
     }
     addEventListener() {}
     play() {
@@ -288,10 +297,15 @@ function simulate({ latency, joinAt = 30, seconds = 60 }) {
     }
   }
   const registrations = []
+  const fetched = []
   const sandbox = {
-    window: { location: { href: 'http://127.0.0.1:3080/' }, addEventListener() {}, __ModuleLoader__: { load: (r) => registrations.push(r) } },
+    window: { location: { href }, addEventListener() {}, __ModuleLoader__: { load: (r) => registrations.push(r) } },
     document: { createElement: () => ({ dataset: {}, remove() {} }), head: { append() {} } },
-    fetch: () => Promise.reject(new Error('offline')),
+    fetch: async (url) => {
+      fetched.push(url)
+      return { ok: true, status: 200, blob: async () => new Blob(['song']) }
+    },
+    AbortController,
     Audio: FakeAudio,
     Date: FakeDate,
     URL,
@@ -314,22 +328,38 @@ function simulate({ latency, joinAt = 30, seconds = 60 }) {
     audio.tick(100)
     if (ms % 1000 === 0) p.align()
     diffs.push(audio.time - p.position())
+    await new Promise((resolve) => setImmediate(resolve))
   }
-  return { seeks: audio.seeks.length, last: diffs.at(-1), worstLate: Math.max(...diffs.slice(-100).map(Math.abs)) }
+  return { seeks: audio.seeks.length, last: diffs.at(-1), fetched, src: audio.src }
 }
 
 for (const latency of [0.4, 0.8, 1.5]) {
-  test(`a seek that takes ${latency}s to sound does not loop, and the audio catches up`, () => {
-    const run = simulate({ latency })
+  test(`a seek that takes ${latency}s to sound does not loop, and the audio catches up`, async () => {
+    const run = await simulate({ latency })
     assert.ok(run.seeks <= 2, `seeked ${run.seeks} times`)
     assert.ok(Math.abs(run.last) < 0.15, `still ${run.last.toFixed(2)}s off after a minute`)
   })
-  test(`from the very start of a song (sounding after ${latency}s), it plays on without going back`, () => {
-    const run = simulate({ latency, joinAt: -2 })
+  test(`from the very start of a song (sounding after ${latency}s), it plays on without going back`, async () => {
+    const run = await simulate({ latency, joinAt: -2 })
     assert.ok(run.seeks <= 2, `seeked ${run.seeks} times`)
     assert.ok(Math.abs(run.last) < 0.15, `still ${run.last.toFixed(2)}s off after a minute`)
   })
 }
+
+test('on DSH desktop (dsh-app://, no content-length) the song is fetched whole and plays in place', async () => {
+  const run = await simulate({ latency: 0.4, href: 'dsh-app://app/', seekableStream: false })
+  assert.deepEqual(run.fetched, ['dsh-app://app/dsh-desk-listen/media/7'])
+  assert.ok(run.src.startsWith('blob:'), run.src)
+  assert.ok(run.seeks <= 2, `seeked ${run.seeks} times`)
+  assert.ok(Math.abs(run.last) < 0.15, `still ${run.last.toFixed(2)}s off after a minute`)
+})
+
+test('a stream that will not seek switches to fetching the song whole', async () => {
+  const run = await simulate({ latency: 0.4, seekableStream: false })
+  assert.deepEqual(run.fetched, ['http://127.0.0.1:3080/dsh-desk-listen/media/7'])
+  assert.ok(run.src.startsWith('blob:'), run.src)
+  assert.ok(Math.abs(run.last) < 0.15, `still ${run.last.toFixed(2)}s off after a minute`)
+})
 
 test('a new version loaded into the same page takes over from the old player', async () => {
   class QuietAudio {
