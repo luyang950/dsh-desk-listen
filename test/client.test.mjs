@@ -265,6 +265,8 @@ function simulate({ latency, joinAt = 30, seconds = 60 }) {
     }
     addEventListener() {}
     play() {
+      // Starting from paused also takes a moment before it sounds.
+      if (this.paused) this.resumeAt = Math.max(this.resumeAt, clock + latency * 1000)
       this.paused = false
       return Promise.resolve()
     }
@@ -281,7 +283,8 @@ function simulate({ latency, joinAt = 30, seconds = 60 }) {
         this.seeking = false
         this.readyState = 4
       }
-      if (!this.paused && !this.seeking && this.readyState >= 3) this.time += (ms / 1000) * this.playbackRate
+      if (this.src && !this.seeking && this.readyState < 3) this.readyState = 4
+      if (!this.paused && !this.seeking && this.readyState >= 3 && clock >= this.resumeAt) this.time += (ms / 1000) * this.playbackRate
     }
   }
   const registrations = []
@@ -321,4 +324,89 @@ for (const latency of [0.4, 0.8, 1.5]) {
     assert.ok(run.seeks <= 2, `seeked ${run.seeks} times`)
     assert.ok(Math.abs(run.last) < 0.15, `still ${run.last.toFixed(2)}s off after a minute`)
   })
+  test(`from the very start of a song (sounding after ${latency}s), it plays on without going back`, () => {
+    const run = simulate({ latency, joinAt: -2 })
+    assert.ok(run.seeks <= 2, `seeked ${run.seeks} times`)
+    assert.ok(Math.abs(run.last) < 0.15, `still ${run.last.toFixed(2)}s off after a minute`)
+  })
 }
+
+test('a new version loaded into the same page takes over from the old player', async () => {
+  class QuietAudio {
+    constructor() {
+      Object.assign(this, { src: '', paused: true, volume: 1, muted: false, playbackRate: 1, readyState: 0, seeking: false, currentTime: 0 })
+    }
+    addEventListener() {}
+    play() {
+      this.paused = false
+      return Promise.resolve()
+    }
+    pause() {
+      this.paused = true
+    }
+    load() {}
+    removeAttribute() {
+      this.src = ''
+    }
+  }
+  const asked = []
+  const view = { id: 1, name: '房间', current: null, queue: [], members: [] }
+  const sandbox = {
+    window: { location: { href: 'http://127.0.0.1:3080/' }, addEventListener() {}, __ModuleLoader__: { load: (r) => sandbox.loaded.push(r) } },
+    document: { createElement: () => ({ dataset: {}, remove() {} }), head: { append() {} } },
+    fetch: async (url) => {
+      asked.push(url)
+      return { status: 200, json: async () => ({ ok: true, data: url.endsWith('/time') ? { now: Date.now() } : view }) }
+    },
+    Audio: QuietAudio,
+    URL,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    console,
+    loaded: [],
+  }
+  sandbox.globalThis = sandbox
+  const load = () => {
+    runInNewContext(SOURCE, sandbox, { filename: 'lib/client.js' })
+    return sandbox.loaded.at(-1).factory(() => REACT_STUB)
+  }
+  const mountIt = (plugin) => {
+    const effects = []
+    plugin.apply({
+      effect: (run) => effects.push(run),
+      get: () => undefined,
+      uiConversation: { events: { register: () => () => {} } },
+      slots: { inject: (k, run) => run(), register: () => () => {} },
+    })
+    for (const run of effects) run()
+  }
+
+  // What 0.1.0 / 0.1.1 left behind: a player with no build and no dispose(), playing.
+  const leftover = { room: 1, view, quiet: true, audio: new QuietAudio() }
+  leftover.audio.src = 'http://127.0.0.1:3080/dsh-desk-listen/media/7'
+  leftover.audio.paused = false
+  sandbox.__dshDeskListen__ = { boss: false, config: {}, status: null, cards: new Map(), listeners: new Set(), version: 0, player: leftover }
+
+  const first = load()
+  mountIt(first)
+  const taken = first.shared.player
+  assert.notEqual(taken, leftover)
+  assert.equal(leftover.room, null, 'the old one has no room, so its timers do nothing')
+  assert.equal(leftover.audio.paused, true)
+  assert.equal(leftover.audio.src, '')
+  assert.equal(taken.quiet, true, 'mute carries over')
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.ok(asked.includes('/dsh-desk-listen/api/game/room/1'), 'the new player follows the same room')
+  assert.equal(taken.room, 1)
+  assert.equal(first.player(), taken, 'the same load keeps its player')
+
+  // The next version replaces this one the same way, through dispose().
+  const second = load()
+  mountIt(second)
+  assert.notEqual(second.shared.player, taken)
+  assert.equal(taken.room, null)
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  second.shared.player.dispose()
+})

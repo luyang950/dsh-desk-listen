@@ -1,6 +1,6 @@
 {
   "name": "dsh-desk-listen",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DeepSeek Harness plugin: 工位股市「一起听」inside the conversation — listen with the room, pick songs and chat, with a boss key and zero token cost.",
   "license": "MIT",
   "repository": {
