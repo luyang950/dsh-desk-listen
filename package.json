@@ -1,0 +1,52 @@
+{
+  "name": "dsh-desk-listen",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: 工位股市「一起听」inside the conversation — listen with the room, pick songs and chat, with a boss key and zero token cost.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.mjs",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    },
+    "compatibility": {
+      "dsh": ">=0.2.1-0 <0.3.0-0"
+    }
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.2.1-0 <0.3.0-0",
+    "react": ">=18.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-conversation": { "optional": true },
+    "react": { "optional": true }
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "keywords": ["deepseek-harness", "dsh-plugin", "dsh", "music", "listen-together", "boss-key"]
+}
