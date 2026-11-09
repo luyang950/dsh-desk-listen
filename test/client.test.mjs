@@ -209,3 +209,116 @@ test('the boss key only answers its own chord, and only while a card is on scree
   assert.equal(press('KeyM', { ctrlKey: true, altKey: true }), true, 'already hidden: the key still brings it back')
   assert.equal(plugin.shared.boss, false)
 })
+
+/* ── keeping in step with the room ───────────────────────────────────────── */
+
+test('sync steps: wait after a seek, jump only when far off, otherwise nudge', () => {
+  const { plugin } = loadBundle()
+  const s = (diff, sinceSeekMs = 60_000, recentSeeks = 0) => plain(plugin.syncStep({ diff, sinceSeekMs, recentSeeks }))
+  assert.deepEqual(s(-1.2, 900), { action: 'wait', rate: 1 }, 'just after a seek the audio always looks behind')
+  assert.deepEqual(s(-0.8), { action: 'rate', rate: 1.06 }, 'under a second behind is caught up, not jumped')
+  assert.deepEqual(s(0.3), { action: 'rate', rate: 0.97 })
+  assert.deepEqual(s(0.05), { action: 'rate', rate: 1 })
+  assert.deepEqual(s(-1.5), { action: 'seek', rate: 1 })
+  assert.deepEqual(s(-5, 60_000, 3), { action: 'rate', rate: 1.06 }, 'out of seeks for now')
+  assert.equal(plugin.nextLead(0.3, 0.9), 0.75)
+  assert.equal(plugin.nextLead(0.3, -0.8), 0)
+  assert.equal(plugin.nextLead(1.8, 1), 2)
+  assert.equal(plugin.nextLead(0.3, 40), 0.3, 'nonsense is ignored')
+})
+
+/**
+ * A stand-in <audio>: after every seek it stays silent for `latency` seconds
+ * (decoder + sound output), then plays on from where it was put.
+ */
+function simulate({ latency, joinAt = 30, seconds = 60 }) {
+  let clock = 1_800_000_000_000
+  class FakeDate extends Date {
+    static now() {
+      return clock
+    }
+  }
+  const audios = []
+  class FakeAudio {
+    constructor() {
+      this.src = ''
+      this.volume = 1
+      this.muted = false
+      this.paused = true
+      this.playbackRate = 1
+      this.readyState = 0
+      this.seeking = false
+      this.time = 0
+      this.resumeAt = 0
+      this.seeks = []
+      audios.push(this)
+    }
+    get currentTime() {
+      return this.time
+    }
+    set currentTime(value) {
+      this.time = value
+      this.seeks.push(clock)
+      this.seeking = true
+      this.readyState = 1
+      this.resumeAt = clock + latency * 1000
+    }
+    addEventListener() {}
+    play() {
+      this.paused = false
+      return Promise.resolve()
+    }
+    pause() {
+      this.paused = true
+    }
+    load() {}
+    removeAttribute() {
+      this.src = ''
+    }
+    tick(ms) {
+      if (this.src && this.readyState < 1) this.readyState = 1
+      if (this.seeking && clock >= this.resumeAt) {
+        this.seeking = false
+        this.readyState = 4
+      }
+      if (!this.paused && !this.seeking && this.readyState >= 3) this.time += (ms / 1000) * this.playbackRate
+    }
+  }
+  const registrations = []
+  const sandbox = {
+    window: { location: { href: 'http://127.0.0.1:3080/' }, addEventListener() {}, __ModuleLoader__: { load: (r) => registrations.push(r) } },
+    document: { createElement: () => ({ dataset: {}, remove() {} }), head: { append() {} } },
+    fetch: () => Promise.reject(new Error('offline')),
+    Audio: FakeAudio,
+    Date: FakeDate,
+    URL,
+    setTimeout,
+    clearTimeout,
+    setInterval,
+    clearInterval,
+    console,
+  }
+  sandbox.globalThis = sandbox
+  runInNewContext(SOURCE, sandbox, { filename: 'lib/client.js' })
+  const plugin = registrations[0].factory(() => REACT_STUB)
+  const p = plugin.createPlayer()
+  const audio = audios[0]
+  p.room = 1
+  p.view = { current: { id: 7, url: '/api/mod-media/listen/7', startAt: clock - joinAt * 1000, pausedAt: null, durationMs: 240_000 } }
+  const diffs = []
+  for (let ms = 0; ms < seconds * 1000; ms += 100) {
+    clock += 100
+    audio.tick(100)
+    if (ms % 1000 === 0) p.align()
+    diffs.push(audio.time - p.position())
+  }
+  return { seeks: audio.seeks.length, last: diffs.at(-1), worstLate: Math.max(...diffs.slice(-100).map(Math.abs)) }
+}
+
+for (const latency of [0.4, 0.8, 1.5]) {
+  test(`a seek that takes ${latency}s to sound does not loop, and the audio catches up`, () => {
+    const run = simulate({ latency })
+    assert.ok(run.seeks <= 2, `seeked ${run.seeks} times`)
+    assert.ok(Math.abs(run.last) < 0.15, `still ${run.last.toFixed(2)}s off after a minute`)
+  })
+}
