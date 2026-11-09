@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "DeepSeek Harness plugin: 工位股市「一起听」inside the conversation — listen with the room, pick songs and chat, with a boss key and zero token cost.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/luyang950/dsh-desk-listen.git"
+  },
+  "homepage": "https://github.com/luyang950/dsh-desk-listen#readme",
+  "bugs": {
+    "url": "https://github.com/luyang950/dsh-desk-listen/issues"
+  },
   "type": "module",
   "main": "./index.mjs",
   "exports": {
@@ -41,12 +49,25 @@
     "react": ">=18.0.0"
   },
   "peerDependenciesMeta": {
-    "@deepseek-ai/cordis": { "optional": true },
-    "@deepseek-ai/dsh-client-ui-conversation": { "optional": true },
-    "react": { "optional": true }
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-conversation": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
   },
   "engines": {
     "node": ">=22.13"
   },
-  "keywords": ["deepseek-harness", "dsh-plugin", "dsh", "music", "listen-together", "boss-key"]
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "dsh",
+    "music",
+    "listen-together",
+    "boss-key"
+  ]
 }
